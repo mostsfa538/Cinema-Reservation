@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -6,9 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-	<Compile Include="CinemaBooking\Models.fs" />
-	<Compile Include="CinemaBooking\Database.fs" />
+    <Compile Include="CinemaBooking\Models.fs" />
+    <Compile Include="CinemaBooking\Database.fs" />
+    <Compile Include="CinemaBooking\Session.fs" />
     <Compile Include="CinemaBooking\BookingFunctions.fs" />
+    <Compile Include="CinemaBooking\Auth.fs" />
+    <Compile Include="CinemaBooking\TicketSystem.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
