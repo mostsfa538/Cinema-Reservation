@@ -12,6 +12,7 @@
     <Compile Include="CinemaBooking\BookingFunctions.fs" />
     <Compile Include="CinemaBooking\Auth.fs" />
     <Compile Include="CinemaBooking\TicketSystem.fs" />
+	<Compile Include="CinemaBooking\SeatLayout.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -2,8 +2,10 @@
 open Models
 open Database
 open BookingFunctions
+open SeatLayout 
 
 [<EntryPoint>]
+
 let main argv =
     printfn "╔════════════════════════════════════════════════════════════╗"
     printfn "║     CINEMA SEAT RESERVATION SYSTEM - DATABASE VERSION      ║"
@@ -15,6 +17,14 @@ let main argv =
     initializeDatabase ()
     printfn ""
 
+    printfn "╔════════════════════════════════════════════════════════════╗"
+    printfn "║ TEST : seat layout architecture                                           ║"
+    printfn "╚════════════════════════════════════════════════════════════╝"
+
+    seedSeatsIfEmpty 10 10         // create 10x10 seats if DB is empty
+    let grid = getSeatLayout()
+    printSeatGridToConsole grid
+    System.Threading.Thread.Sleep(800) // optional pause
     // ============================================================
     // TEST 1: SAVE USER - Testing saveUser function
     // ============================================================
