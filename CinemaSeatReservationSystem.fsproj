@@ -6,6 +6,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Giraffe" Version="6.4.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Include="CinemaBooking\Models.fs" />
     <Compile Include="CinemaBooking\Database.fs" />
     <Compile Include="CinemaBooking\Session.fs" />
@@ -13,6 +18,7 @@
     <Compile Include="CinemaBooking\Auth.fs" />
     <Compile Include="CinemaBooking\TicketSystem.fs" />
 	<Compile Include="CinemaBooking\SeatLayout.fs" />
+    <Compile Include="CinemaBooking\WebApi.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

@@ -128,6 +128,19 @@ let saveTicket (ticket: Ticket) =
 
 
 
+//6. Check if user has existing tickets
+let userHasTickets userId =
+    use connection = getConnection ()
+    connection.Open()
+
+    let sql = "SELECT COUNT(*) FROM Tickets WHERE UserId = @userId"
+    use cmd = new SqliteCommand(sql, connection)
+    cmd.Parameters.AddWithValue("@userId", userId) |> ignore
+
+    let count = cmd.ExecuteScalar() :?> int64 |> int
+    count > 0
+
+
 // Get All Seats From Database
 let getAllSeats () =
     use connection = getConnection ()
