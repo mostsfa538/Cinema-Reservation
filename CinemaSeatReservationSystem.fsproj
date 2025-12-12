@@ -18,7 +18,8 @@
     <Compile Include="CinemaBooking\Repository.fs" />
     <Compile Include="CinemaBooking\Auth.fs" />
     <Compile Include="CinemaBooking\TicketSystem.fs" />
-
+    <Compile Include="CinemaBooking\SeatLayout.fs" />
+    <Compile Include="CinemaBooking\WebApi.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
