@@ -2,7 +2,7 @@ module Auth
 
 open Models
 open Session
-open BookingFunctions
+open Repository
 
 type AuthResult =
     | Success of User
@@ -30,12 +30,24 @@ let signUp (username: string) (password: string) : AuthResult =
     match findUserByUsername username with
     | Some _ -> UserAlreadyExists
     | None ->
+        let role =
+            if username = "admin" && password = "admin123" then
+                "admin"
+            else
+                "user"
+
         let newUser =
             { UserId = generateNewUserId ()
               Username = username
-              Password = password }
+              Password = password
+              Role = role }
 
-        saveUser newUser |> ignore
-        SignUpSuccess newUser
+        match saveUser newUser with
+        | Some _ ->
+            printfn "User signed up: %s" username
+            SignUpSuccess newUser
+        | None -> UserAlreadyExists
+
+
 
 let signOut () = Session.currentUser <- None

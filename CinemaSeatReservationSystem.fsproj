@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="Giraffe" Version="6.4.0" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
@@ -14,11 +15,10 @@
     <Compile Include="CinemaBooking\Models.fs" />
     <Compile Include="CinemaBooking\Database.fs" />
     <Compile Include="CinemaBooking\Session.fs" />
-    <Compile Include="CinemaBooking\BookingFunctions.fs" />
+    <Compile Include="CinemaBooking\Repository.fs" />
     <Compile Include="CinemaBooking\Auth.fs" />
     <Compile Include="CinemaBooking\TicketSystem.fs" />
-	<Compile Include="CinemaBooking\SeatLayout.fs" />
-    <Compile Include="CinemaBooking\WebApi.fs" />
+
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -27,3 +27,4 @@
   </ItemGroup>
 
 </Project>
+
