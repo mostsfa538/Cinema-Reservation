@@ -26,7 +26,7 @@ let signIn (username: string) (password: string) : AuthResult =
     | Some _ -> IncorrectPassword
     | None -> UserNotFound
 
-let signUp (username: string) (password: string) : AuthResult =
+let signUp (username: string) (password: string) (name: string option) : AuthResult =
     match findUserByUsername username with
     | Some _ -> UserAlreadyExists
     | None ->
@@ -40,6 +40,7 @@ let signUp (username: string) (password: string) : AuthResult =
             { UserId = generateNewUserId ()
               Username = username
               Password = password
+              Name = name
               Role = role }
 
         match saveUser newUser with

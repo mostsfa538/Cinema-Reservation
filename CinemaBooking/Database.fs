@@ -18,6 +18,7 @@ let initializeDatabase() =
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
+            name TEXT,
             role TEXT NOT NULL DEFAULT 'user'
         );
 
@@ -33,6 +34,7 @@ let initializeDatabase() =
         -- Rooms table
         CREATE TABLE IF NOT EXISTS rooms (
             room_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_name TEXT NOT NULL,
             no_rows INTEGER NOT NULL,
             no_col INTEGER NOT NULL
         );

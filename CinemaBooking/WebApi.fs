@@ -9,11 +9,33 @@ open Database
 open Repository
 open Auth
 open SeatLayout
+open ScreeningEngine
 open System.Text.Json
+open System.Text.Json.Serialization
+
+// Custom DateTime converter to handle local time without timezone conversion
+type LocalDateTimeConverter() =
+    inherit JsonConverter<DateTime>()
+    
+    override _.Read(reader: byref<Utf8JsonReader>, typeToConvert: Type, options: JsonSerializerOptions) =
+        let dateString = reader.GetString()
+        // Parse datetime string as local time
+        if dateString.Contains("T") then
+            DateTime.ParseExact(dateString.Replace("T", " "), "yyyy-MM-dd HH:mm:ss", null)
+        else
+            DateTime.Parse(dateString)
+    
+    override _.Write(writer: Utf8JsonWriter, value: DateTime, options: JsonSerializerOptions) =
+        // Write datetime in local format without timezone
+        writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ss"))
 
 // JSON serialization options
 let jsonOptions =
-    JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
+    let options = JsonSerializerOptions()
+    options.PropertyNamingPolicy <- JsonNamingPolicy.CamelCase
+    options.PropertyNameCaseInsensitive <- true
+    options.Converters.Add(LocalDateTimeConverter())
+    options
 
 // Helper functions for JSON responses
 let jsonResponse (data: 'a) : HttpHandler =
@@ -28,263 +50,276 @@ let parseJson<'T> (ctx: HttpContext) =
     }
 
 // Request/Response DTOs
-//type RegisterRequest =
-//    { Name: string
-//      Email: string
-//      Password: string }
+type RegisterRequest =
+    { Name: string
+      Email: string
+      Password: string }
 
-//type LoginRequest = { Email: string; Password: string }
+type LoginRequest = 
+    { Email: string
+      Password: string }
 
-//type SeatStatusResponse =
-//    { SeatId: string
-//      Row: int
-//      Seat: int
-//      IsBooked: bool }
+type BookingRequest =
+    { UserId: int
+      ScreeningId: int
+      SeatIds: int list }
 
-//// API Handlers
-//let registerHandler: HttpHandler =
-//    fun next ctx ->
-//        task {
-//            let! request = parseJson<RegisterRequest> ctx
+// API Handlers
+let registerHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! request = parseJson<RegisterRequest> ctx
 
-//            // Use email as username for authentication
-//            match signUp request.Email request.Password with
-//            | SignUpSuccess user ->
-//                // Update user with name if needed (for now, we'll use email as username)
-//                let response =
-//                    {| Success = true
-//                       User =
-//                        {| Id = user.UserId
-//                           Name = request.Name
-//                           Email = user.Username |} |}
+            match signUp request.Email request.Password (Some request.Name) with
+            | SignUpSuccess user ->
+                let response =
+                    {| Success = true
+                       User =
+                        {| Id = user.UserId
+                           Name = (match user.Name with | Some n -> n | None -> user.Username)
+                           Email = user.Username |} |}
 
-//                return! jsonResponse response next ctx
-//            | UserAlreadyExists ->
-//                ctx.SetStatusCode 400
+                return! jsonResponse response next ctx
+            | UserAlreadyExists ->
+                ctx.SetStatusCode 400
+                let response =
+                    {| Success = false
+                       Message = "User already exists" |}
+                return! jsonResponse response next ctx
+            | _ ->
+                ctx.SetStatusCode 500
+                let response =
+                    {| Success = false
+                       Message = "Failed to create user" |}
+                return! jsonResponse response next ctx
+        }
 
-//                let response =
-//                    {| Success = false
-//                       Message = "User already exists" |}
+let loginHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! request = parseJson<LoginRequest> ctx
 
-//                return! jsonResponse response next ctx
-//            | _ ->
-//                ctx.SetStatusCode 500
+            match signIn request.Email request.Password with
+            | Success user ->
+                let response =
+                    {| Success = true
+                       User =
+                        {| Id = user.UserId
+                           Name = (match user.Name with | Some n -> n | None -> user.Username)
+                           Email = user.Username
+                           Role = user.Role |} |}
+                return! jsonResponse response next ctx
+            | IncorrectPassword ->
+                ctx.SetStatusCode 401
+                let response =
+                    {| Success = false
+                       Message = "Incorrect password" |}
+                return! jsonResponse response next ctx
+            | UserNotFound ->
+                ctx.SetStatusCode 404
+                let response =
+                    {| Success = false
+                       Message = "User not found" |}
+                return! jsonResponse response next ctx
+            | _ ->
+                ctx.SetStatusCode 500
+                let response =
+                    {| Success = false
+                       Message = "Login failed" |}
+                return! jsonResponse response next ctx
+        }
 
-//                let response =
-//                    {| Success = false
-//                       Message = "Failed to create user" |}
+// Get all movies
+let getMoviesHandler: HttpHandler =
+    fun next ctx ->
+        let movies = getAllMovies()
+        jsonResponse movies next ctx
 
-//                return! jsonResponse response next ctx
-//        }
+// Get all rooms
+let getRoomsHandler: HttpHandler =
+    fun next ctx ->
+        let rooms = getAllRooms()
+        jsonResponse rooms next ctx
 
-//let loginHandler: HttpHandler =
-//    fun next ctx ->
-//        task {
-//            let! request = parseJson<LoginRequest> ctx
+// Get all screenings
+let getScreeningsHandler: HttpHandler =
+    fun next ctx ->
+        let screenings = getAllScreenings()
+        jsonResponse screenings next ctx
 
-//            // Email is used as username in our system
-//            match signIn request.Email request.Password with
-//            | Success user ->
-//                // For now, use username as name (since we don't store name separately)
-//                // In a real system, you'd have a separate Name field
-//                let response =
-//                    {| Success = true
-//                       User =
-//                        {| Id = user.UserId
-//                           Name = user.Username
-//                           Email = user.Username |} |}
+// Get upcoming screenings
+let getUpcomingScreeningsHandler: HttpHandler =
+    fun next ctx ->
+        let screenings = getUpcomingScreenings()
+        jsonResponse screenings next ctx
 
-//                return! jsonResponse response next ctx
-//            | IncorrectPassword ->
-//                ctx.SetStatusCode 401
+// Get seats for a specific screening
+let getScreeningSeatsHandler (screeningId: int): HttpHandler =
+    fun next ctx ->
+        let seats = getSeatsForScreening screeningId
+        jsonResponse seats next ctx
 
-//                let response =
-//                    {| Success = false
-//                       Message = "Incorrect password" |}
+// Book seats
+let bookSeatsHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! request = parseJson<BookingRequest> ctx
+            
+            // Validate: Only 1 seat per booking
+            if request.SeatIds.Length > 1 then
+                ctx.SetStatusCode 400
+                let response =
+                    {| Success = false
+                       Message = "You can only book 1 seat per booking" |}
+                return! jsonResponse response next ctx
+            elif request.SeatIds.Length = 0 then
+                ctx.SetStatusCode 400
+                let response =
+                    {| Success = false
+                       Message = "Please select a seat" |}
+                return! jsonResponse response next ctx
+            else
+                let mutable ticketIds = []
+                let mutable errors = []
+                
+                for seatId in request.SeatIds do
+                    match bookSeat request.ScreeningId seatId request.UserId with
+                    | Ok ticketId -> ticketIds <- ticketId :: ticketIds
+                    | Error msg -> errors <- msg :: errors
+                
+                if errors.IsEmpty then
+                    let response =
+                        {| Success = true
+                           TicketIds = ticketIds
+                           Message = "Booking successful" |}
+                    return! jsonResponse response next ctx
+                else
+                    ctx.SetStatusCode 400
+                    let response =
+                        {| Success = false
+                           Message = String.concat ", " errors
+                           TicketIds = ticketIds |}
+                    return! jsonResponse response next ctx
+        }
 
-//                return! jsonResponse response next ctx
-//            | UserNotFound ->
-//                ctx.SetStatusCode 404
+// Get user tickets
+let getUserTicketsHandler (userId: int): HttpHandler =
+    fun next ctx ->
+        let tickets = getUserTickets userId
+        jsonResponse tickets next ctx
 
-//                let response =
-//                    {| Success = false
-//                       Message = "User not found" |}
+// Admin: Create movie
+let createMovieHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! movie = parseJson<Movie> ctx
+            createMovie movie.MovieName movie.MoviePic movie.Description movie.Duration
+            let response = {| Success = true; Message = "Movie created" |}
+            return! jsonResponse response next ctx
+        }
 
-//                return! jsonResponse response next ctx
-//            | _ ->
-//                ctx.SetStatusCode 500
+// Admin: Update movie
+let updateMovieHandler (movieId: int): HttpHandler =
+    fun next ctx ->
+        task {
+            let! movie = parseJson<Movie> ctx
+            let success = updateMovie movieId movie.MovieName movie.MoviePic movie.Description movie.Duration
+            let response = {| Success = success |}
+            return! jsonResponse response next ctx
+        }
 
-//                let response =
-//                    {| Success = false
-//                       Message = "Login failed" |}
+// Admin: Delete movie
+let deleteMovieHandler (movieId: int): HttpHandler =
+    fun next ctx ->
+        let success = deleteMovie movieId
+        let response = {| Success = success |}
+        jsonResponse response next ctx
 
-//                return! jsonResponse response next ctx
-//        }
+// Admin: Create room
+let createRoomHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! room = parseJson<Room> ctx
+            let roomId = createRoom room.RoomName room.NoRows room.NoCol
+            let response = {| Success = true; RoomId = roomId |}
+            return! jsonResponse response next ctx
+        }
 
-//let getSeatsHandler: HttpHandler =
-//    fun next ctx ->
-//        let seats = getAllSeats ()
+// Admin: Update room
+let updateRoomHandler (roomId: int): HttpHandler =
+    fun next ctx ->
+        task {
+            let! room = parseJson<Room> ctx
+            let success = updateRoom roomId room.RoomName room.NoRows room.NoCol
+            let response = {| Success = success |}
+            return! jsonResponse response next ctx
+        }
 
-//        let seatResponses =
-//            seats
-//            |> List.map (fun seat ->
-//                let rowLabel = char (int 'A' + seat.RowNumber - 1)
+// Admin: Delete room
+let deleteRoomHandler (roomId: int): HttpHandler =
+    fun next ctx ->
+        let success = deleteRoom roomId
+        let response = {| Success = success |}
+        jsonResponse response next ctx
 
-//                { SeatId = sprintf "%c%d" rowLabel seat.SeatNumber
-//                  Row = seat.RowNumber
-//                  Seat = seat.SeatNumber
-//                  IsBooked = seat.IsReserved })
+// Admin: Create screening
+let createScreeningHandler: HttpHandler =
+    fun next ctx ->
+        task {
+            let! screening = parseJson<Screening> ctx
+            let success = createScreening screening.MovieId screening.RoomId screening.StartTime
+            let response = {| Success = success |}
+            return! jsonResponse response next ctx
+        }
 
-//        jsonResponse seatResponses next ctx
+// Admin: Update screening
+let updateScreeningHandler (screeningId: int): HttpHandler =
+    fun next ctx ->
+        task {
+            let! screening = parseJson<Screening> ctx
+            let success = updateScreening screeningId screening.MovieId screening.RoomId screening.StartTime
+            let response = {| Success = success |}
+            return! jsonResponse response next ctx
+        }
 
-//type BookingRequest =
-//    { UserId: int
-//      UserEmail: string
-//      Seats: string[] }
+// Admin: Delete screening
+let deleteScreeningHandler (screeningId: int): HttpHandler =
+    fun next ctx ->
+        let success = deleteScreening screeningId
+        let response = {| Success = success |}
+        jsonResponse response next ctx
 
-//let bookSeatsHandler: HttpHandler =
-//    fun next ctx ->
-//        task {
-//            let! request = parseJson<BookingRequest> ctx
-
-//            let mutable success = true
-//            let mutable bookedSeatIds = []
-//            let mutable errors = []
-
-//            // Find user by email (username in our system)
-//            let user = findUserByUsername request.UserEmail
-
-//            match user with
-//            | None ->
-//                ctx.SetStatusCode 404
-
-//                let response =
-//                    {| Success = false
-//                       Message = "User not found" |}
-
-//                return! jsonResponse response next ctx
-//            | Some user ->
-//                // Check if user already has a ticket
-//                if userHasTickets user.UserId then
-//                    ctx.SetStatusCode 400
-
-//                    let response =
-//                        {| Success = false
-//                           Message = "You already have a ticket. Each user can only book one ticket." |}
-
-//                    return! jsonResponse response next ctx
-
-//                // Check if user is trying to book more than one seat (each seat = one ticket)
-//                if request.Seats.Length > 1 then
-//                    ctx.SetStatusCode 400
-
-//                    let response =
-//                        {| Success = false
-//                           Message = "You can only book one seat at a time. Each user is limited to one ticket." |}
-
-//                    return! jsonResponse response next ctx
-
-//                // Parse seat IDs (e.g., "A1", "B2") to row and seat numbers
-//                let parseSeatId (seatId: string) =
-//                    if seatId.Length >= 2 then
-//                        let rowChar = seatId.[0]
-//                        let rowNum = int rowChar - int 'A' + 1
-//                        let seatNum = int (seatId.Substring(1))
-//                        Some(rowNum, seatNum)
-//                    else
-//                        None
-
-//                // Reserve each seat
-//                for seatId in request.Seats do
-//                    match parseSeatId seatId with
-//                    | Some(rowNum, seatNum) ->
-//                        match findSeatByCoordinates rowNum seatNum with
-//                        | Some seat ->
-//                            if not seat.IsReserved then
-//                                match saveSeatReservation seat.SeatId with
-//                                | Some _ ->
-//                                    // Create ticket
-//                                    let ticket =
-//                                        { TicketId = Guid.NewGuid().ToString()
-//                                          SeatId = seat.SeatId
-//                                          UserId = user.UserId }
-
-//                                    match saveTicket ticket with
-//                                    | Some _ -> bookedSeatIds <- seatId :: bookedSeatIds
-//                                    | None ->
-//                                        success <- false
-//                                        errors <- (sprintf "Failed to create ticket for seat %s" seatId) :: errors
-//                                | None ->
-//                                    success <- false
-//                                    errors <- (sprintf "Failed to reserve seat %s" seatId) :: errors
-//                            else
-//                                success <- false
-//                                errors <- (sprintf "Seat %s is already reserved" seatId) :: errors
-//                        | None ->
-//                            success <- false
-//                            errors <- (sprintf "Seat %s not found" seatId) :: errors
-//                    | None ->
-//                        success <- false
-//                        errors <- (sprintf "Invalid seat ID format: %s" seatId) :: errors
-
-//                if success && bookedSeatIds.Length = request.Seats.Length then
-//                    let ticketId = Guid.NewGuid().ToString()
-
-//                    let response =
-//                        {| Success = true
-//                           TicketId = ticketId
-//                           Seats = bookedSeatIds
-//                           Total = bookedSeatIds.Length * 10 |}
-
-//                    return! jsonResponse response next ctx
-//                else
-//                    ctx.SetStatusCode 400
-
-//                    let response =
-//                        {| Success = false
-//                           Message = String.Join(", ", errors)
-//                           BookedSeats = bookedSeatIds |}
-
-//                    return! jsonResponse response next ctx
-//        }
-
-//let getUserBookingsHandler (userId: int) : HttpHandler =
-//    fun next ctx ->
-//        use connection = getConnection ()
-//        connection.Open()
-
-//        let sql =
-//            """
-//            SELECT t.TicketId, s.RowNumber, s.SeatNumber, t.UserId
-//            // FROM Tickets t
-//            INNER JOIN Seats s ON t.SeatId = s.SeatId
-//            WHERE t.UserId = @userId
-//        """
-
-//        use cmd = new Microsoft.Data.Sqlite.SqliteCommand(sql, connection)
-//        cmd.Parameters.AddWithValue("@userId", userId) |> ignore
-//        use reader = cmd.ExecuteReader()
-
-//        let bookings =
-//            [ while reader.Read() do
-//                  let rowNum = reader.GetInt32(1)
-//                  let seatNum = reader.GetInt32(2)
-//                  let rowLabel = char (int 'A' + rowNum - 1)
-
-//                  yield
-//                      {| TicketId = reader.GetString(0)
-//                         SeatId = sprintf "%c%d" rowLabel seatNum
-//                         Row = rowNum
-//                         Seat = seatNum |} ]
-
-//        jsonResponse bookings next ctx
-
-//// Web application routes
-//let webApp: HttpHandler =
-//    choose
-//        [ POST >=> route "/api/register" >=> registerHandler
-//          POST >=> route "/api/login" >=> loginHandler
-//          GET >=> route "/api/seats" >=> getSeatsHandler
-//          POST >=> route "/api/book" >=> bookSeatsHandler
-//          GET >=> routef "/api/bookings/%i" getUserBookingsHandler
-//          RequestErrors.NOT_FOUND "Not Found" ]
+// Web application routes
+let webApp: HttpHandler =
+    choose
+        [ 
+          // Auth routes
+          POST >=> route "/api/register" >=> registerHandler
+          POST >=> route "/api/login" >=> loginHandler
+          
+          // Public routes
+          GET >=> route "/api/movies" >=> getMoviesHandler
+          GET >=> route "/api/rooms" >=> getRoomsHandler
+          GET >=> route "/api/screenings" >=> getScreeningsHandler
+          GET >=> route "/api/screenings/upcoming" >=> getUpcomingScreeningsHandler
+          GET >=> routef "/api/screenings/%i/seats" getScreeningSeatsHandler
+          
+          // Booking routes
+          POST >=> route "/api/book" >=> bookSeatsHandler
+          GET >=> routef "/api/users/%i/tickets" getUserTicketsHandler
+          
+          // Admin routes
+          POST >=> route "/api/admin/movies" >=> createMovieHandler
+          PUT >=> routef "/api/admin/movies/%i" updateMovieHandler
+          DELETE >=> routef "/api/admin/movies/%i" deleteMovieHandler
+          
+          POST >=> route "/api/admin/rooms" >=> createRoomHandler
+          PUT >=> routef "/api/admin/rooms/%i" updateRoomHandler
+          DELETE >=> routef "/api/admin/rooms/%i" deleteRoomHandler
+          
+          POST >=> route "/api/admin/screenings" >=> createScreeningHandler
+          PUT >=> routef "/api/admin/screenings/%i" updateScreeningHandler
+          DELETE >=> routef "/api/admin/screenings/%i" deleteScreeningHandler
+          
+          RequestErrors.NOT_FOUND "Not Found" 
+        ]

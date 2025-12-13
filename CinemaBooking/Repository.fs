@@ -15,12 +15,13 @@ let saveUser (user: User) =
     try
         use cmd =
             new SqliteCommand(
-                "INSERT INTO user (username, password, role) VALUES (@Username, @Password, @Role)",
+                "INSERT INTO user (username, password, name, role) VALUES (@Username, @Password, @Name, @Role)",
                 connection
             )
 
         cmd.Parameters.AddWithValue("@Username", user.Username) |> ignore
         cmd.Parameters.AddWithValue("@Password", user.Password) |> ignore
+        cmd.Parameters.AddWithValue("@Name", (match user.Name with | Some n -> box n | None -> box DBNull.Value)) |> ignore
         cmd.Parameters.AddWithValue("@Role", user.Role) |> ignore
         cmd.ExecuteNonQuery() |> ignore
         Some user
@@ -37,6 +38,7 @@ let findUserByUsername username =
             user_id as UserId, 
             username as Username, 
             password as Password,
+            name as Name,
             role as Role
         FROM user 
         WHERE username = @Username
@@ -153,6 +155,9 @@ let deleteMovie movieId =
     use connection = getConnection ()
     connection.Open()
 
+    let deleteScreeningsSql = "DELETE FROM screenings WHERE movie_id = @MovieId"
+    connection.Execute(deleteScreeningsSql, dict [ "MovieId", box movieId ]) |> ignore
+
     let sql = "DELETE FROM movies WHERE movie_id = @MovieId"
     let parameters = dict [ "MovieId", box movieId ]
 
@@ -161,15 +166,14 @@ let deleteMovie movieId =
 
 // ==================== ROOM OPERATIONS (ADMIN) ====================
 
-let createRoom noRows noCol =
+let createRoom roomName noRows noCol =
     use connection = getConnection ()
     connection.Open()
 
-    // Insert room
     let roomSql =
-        "INSERT INTO rooms (no_rows, no_col) VALUES (@NoRows, @NoCol); SELECT last_insert_rowid();"
+        "INSERT INTO rooms (room_name, no_rows, no_col) VALUES (@RoomName, @NoRows, @NoCol); SELECT last_insert_rowid();"
 
-    let roomParams = dict [ "NoRows", box noRows; "NoCol", box noCol ]
+    let roomParams = dict [ "RoomName", box roomName; "NoRows", box noRows; "NoCol", box noCol ]
     let roomId = connection.ExecuteScalar<int64>(roomSql, roomParams) |> int
 
     // Create seats for this room
@@ -191,7 +195,8 @@ let getAllRooms () =
     let sql =
         """
         SELECT 
-            room_id as RoomId, 
+            room_id as RoomId,
+            room_name as RoomName,
             no_rows as NoRows, 
             no_col as NoCol 
         FROM rooms
@@ -206,7 +211,8 @@ let getRoomById roomId =
     let sql =
         """
         SELECT 
-            room_id as RoomId, 
+            room_id as RoomId,
+            room_name as RoomName,
             no_rows as NoRows, 
             no_col as NoCol 
         FROM rooms 
@@ -216,16 +222,15 @@ let getRoomById roomId =
     let parameters = dict [ "RoomId", box roomId ]
     connection.Query<Room>(sql, parameters) |> Seq.tryHead
 
-let updateRoom roomId noRows noCol =
+let updateRoom roomId roomName noRows noCol =
     use connection = getConnection ()
     connection.Open()
 
-    // Update room
     let sql =
-        "UPDATE rooms SET no_rows = @NoRows, no_col = @NoCol WHERE room_id = @RoomId"
+        "UPDATE rooms SET room_name = @RoomName, no_rows = @NoRows, no_col = @NoCol WHERE room_id = @RoomId"
 
     let parameters =
-        dict [ "RoomId", box roomId; "NoRows", box noRows; "NoCol", box noCol ]
+        dict [ "RoomId", box roomId; "RoomName", box roomName; "NoRows", box noRows; "NoCol", box noCol ]
 
     let rowsAffected = connection.Execute(sql, parameters)
 
@@ -251,11 +256,9 @@ let deleteRoom roomId =
     use connection = getConnection ()
     connection.Open()
 
-    // Delete associated seats first
     let deleteSeatsSql = "DELETE FROM seats WHERE room_id = @RoomId"
     connection.Execute(deleteSeatsSql, dict [ "RoomId", box roomId ]) |> ignore
 
-    // Delete room
     let sql = "DELETE FROM rooms WHERE room_id = @RoomId"
     let parameters = dict [ "RoomId", box roomId ]
 
@@ -264,33 +267,62 @@ let deleteRoom roomId =
 
 // ==================== SCREENING OPERATIONS (ADMIN) ====================
 
+let checkScreeningConflict roomId (startTime: DateTime) (endTime: DateTime) =
+    use connection = getConnection ()
+    connection.Open()
+
+    let sql =
+        """
+        SELECT COUNT(*) 
+        FROM screenings 
+        WHERE room_id = @RoomId 
+        AND (
+            (@StartTime >= start_time AND @StartTime < end_time)
+            OR
+            (@EndTime > start_time AND @EndTime <= end_time)
+            OR
+            (@StartTime <= start_time AND @EndTime >= end_time)
+        )
+        """
+
+    use cmd = new Microsoft.Data.Sqlite.SqliteCommand(sql, connection)
+    cmd.Parameters.AddWithValue("@RoomId", roomId) |> ignore
+    cmd.Parameters.AddWithValue("@StartTime", startTime.ToString("yyyy-MM-dd HH:mm:ss")) |> ignore
+    cmd.Parameters.AddWithValue("@EndTime", endTime.ToString("yyyy-MM-dd HH:mm:ss")) |> ignore
+    
+    let count = cmd.ExecuteScalar() :?> int64
+    count > 0L
+
 let createScreening movieId roomId (startTime: DateTime) =
     use connection = getConnection ()
     connection.Open()
 
-    // Get movie duration
     let movieOpt = getMovieById movieId
 
     match movieOpt with
     | Some movie ->
         let endTime = startTime.AddMinutes(float movie.Duration)
 
-        let sql =
-            """
-            INSERT INTO screenings (movie_id, room_id, start_time, end_time) 
-            VALUES (@MovieId, @RoomId, @StartTime, @EndTime)
-        """
+        if checkScreeningConflict roomId startTime endTime then
+            printfn "Screening conflict! Room %d is already booked at this time" roomId
+            false
+        else
+            let sql =
+                """
+                INSERT INTO screenings (movie_id, room_id, start_time, end_time) 
+                VALUES (@MovieId, @RoomId, @StartTime, @EndTime)
+                """
 
-        let parameters =
-            dict
-                [ "MovieId", box movieId
-                  "RoomId", box roomId
-                  "StartTime", box (startTime.ToString("yyyy-MM-dd HH:mm:ss"))
-                  "EndTime", box (endTime.ToString("yyyy-MM-dd HH:mm:ss")) ]
+            let parameters =
+                dict
+                    [ "MovieId", box movieId
+                      "RoomId", box roomId
+                      "StartTime", box (startTime.ToString("yyyy-MM-dd HH:mm:ss"))
+                      "EndTime", box (endTime.ToString("yyyy-MM-dd HH:mm:ss")) ]
 
-        connection.Execute(sql, parameters) |> ignore
-        printfn "Screening created successfully!"
-        true
+            connection.Execute(sql, parameters) |> ignore
+            printfn "Screening created successfully!"
+            true
     | None ->
         printfn "Movie not found!"
         false
@@ -313,7 +345,22 @@ let getAllScreenings () =
         ORDER BY s.start_time
     """
 
-    connection.Query<ScreeningView>(sql) |> Seq.toList
+    use cmd = new Microsoft.Data.Sqlite.SqliteCommand(sql, connection)
+    use reader = cmd.ExecuteReader()
+    
+    let screenings = ResizeArray<ScreeningView>()
+    while reader.Read() do
+        let screening = {
+            ScreeningId = reader.GetInt32(0)
+            MovieName = reader.GetString(1)
+            RoomId = reader.GetInt32(2)
+            StartTime = DateTime.Parse(reader.GetString(3))
+            EndTime = DateTime.Parse(reader.GetString(4))
+            Duration = reader.GetInt32(5)
+        }
+        screenings.Add(screening)
+    
+    screenings |> Seq.toList
 
 let getScreeningById screeningId =
     use connection = getConnection ()
@@ -322,17 +369,29 @@ let getScreeningById screeningId =
     let sql =
         """
         SELECT 
-            screening_id as ScreeningId, 
-            movie_id as MovieId, 
-            room_id as RoomId, 
-            start_time as StartTime, 
-            end_time as EndTime 
+            screening_id, 
+            movie_id, 
+            room_id, 
+            start_time, 
+            end_time 
         FROM screenings 
         WHERE screening_id = @ScreeningId
     """
 
-    let parameters = dict [ "ScreeningId", box screeningId ]
-    connection.Query<Screening>(sql, parameters) |> Seq.tryHead
+    use cmd = new Microsoft.Data.Sqlite.SqliteCommand(sql, connection)
+    cmd.Parameters.AddWithValue("@ScreeningId", screeningId) |> ignore
+    use reader = cmd.ExecuteReader()
+    
+    if reader.Read() then
+        Some {
+            ScreeningId = reader.GetInt32(0)
+            MovieId = reader.GetInt32(1)
+            RoomId = reader.GetInt32(2)
+            StartTime = DateTime.Parse(reader.GetString(3))
+            EndTime = DateTime.Parse(reader.GetString(4))
+        }
+    else
+        None
 
 let updateScreening screeningId movieId roomId (startTime: DateTime) =
     use connection = getConnection ()

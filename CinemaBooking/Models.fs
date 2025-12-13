@@ -8,6 +8,7 @@ type User =
     { UserId: int
       Username: string
       Password: string
+      Name: string option
       Role: string } // "admin" or "user"
 
 // Movie model
@@ -22,7 +23,10 @@ type Movie =
 // Room model
 [<CLIMutable>]
 type Room =
-    { RoomId: int; NoRows: int; NoCol: int }
+    { RoomId: int
+      RoomName: string
+      NoRows: int
+      NoCol: int }
 
 // Seat model
 [<CLIMutable>]
