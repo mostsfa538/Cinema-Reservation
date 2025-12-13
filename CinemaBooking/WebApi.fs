@@ -256,7 +256,7 @@ let getUserBookingsHandler (userId: int) : HttpHandler =
         let sql =
             """
             SELECT t.TicketId, s.RowNumber, s.SeatNumber, t.UserId
-            FROM Tickets t
+            // FROM Tickets t
             INNER JOIN Seats s ON t.SeatId = s.SeatId
             WHERE t.UserId = @userId
         """
